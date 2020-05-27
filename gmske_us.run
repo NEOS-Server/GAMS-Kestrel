@@ -1,0 +1,10 @@
+#!/bin/sh
+gmsPython="${5}GMSPython/python"
+if [ -f "${gmsPython}" ]
+then
+    "$gmsPython" "${5}gmske_ux.out" "$4"
+else
+    python3 "${5}gmske_ux.out" "$4"
+fi
+[ $? = 0 ] || echo "ERROR: Solver exitcode nonzero: $?" 1>&2
+exit 11
