@@ -39,6 +39,7 @@ import io
 import xml.dom.minidom
 import string
 import json
+import pathlib
 
 import_error = None
 
@@ -140,7 +141,7 @@ class KestrelGamsClient:
       # Write the message to standard output
       sys.stdout.write("\n--- Kestrel error: %s\n\n" % str)
       
-    elif (self.logopt == 2):
+    if self.logopt in [2,4]:
       # Append the error message to the logfile indicated
       try:
         f = open(self.logfilename,'a')
@@ -157,6 +158,11 @@ class KestrelGamsClient:
       self.Fatal("Could not append to status file %s\n" % self.statfilename)
 
     sys.exit(0)
+
+  def getDefaultEmail(self):
+    if 'NEOS_EMAIL' in os.environ:
+      return os.environ['NEOS_EMAIL']
+    return None
   
   def parseControlFile(self):
     """
@@ -228,8 +234,8 @@ class KestrelGamsClient:
     #if self.cntver != 41 and self.cntver != 42:
     #  self.Fatal("GAMS 22.x required")
 	
-    if self.cntver not in [41, 42, 44, 46, 47, 48, 49]:
-      self.Fatal("GAMS cntr-file version 41, 42, 44, 46, 47, 48, 49 required")
+    if self.cntver not in [41, 42, 44, 46, 47, 48, 49, 50]:
+      self.Fatal("GAMS cntr-file version 41, 42, 44, 46, 47, 48, 49, 50 required")
 
     # extract isAscii, useOptions
     m = re.match(r'(\d+)\s+(\d+)',lines[12])
@@ -286,6 +292,12 @@ class KestrelGamsClient:
 
     # patch parameter file
     lines[36] = "gmsprmun.scr"
+    
+    # downgrade the cntr-file version 50 to 49 // No change required since this was in the license section which does not get copied
+    if self.cntver == 50:
+      # 50 -> 49
+      lines[0] = "49\n"
+      self.cntver = 49
     
     # downgrade the cntr-file version 49 to 48 // No change required since this was in the license section which does not get copied
     if self.cntver == 49:
@@ -410,7 +422,7 @@ class KestrelGamsClient:
   def writeLog(self, text):
     if self.logopt in [1,3,4]:
       sys.stdout.write(text)
-    elif (self.logopt == 2):
+    if self.logopt in [2,4]:
       try:
         f = open(self.logfilename,'a')
         f.write(text)
@@ -508,13 +520,13 @@ class KestrelGamsClient:
       if import_error:
         self.Error(import_error)
       if sys.platform == "win32":
-        os.environ['REQUESTS_CA_BUNDLE'] = os.path.join(os.path.dirname(sys.executable), "cacert.pem")
+        os.environ['REQUESTS_CA_BUNDLE'] = os.path.join(os.path.dirname(sys.executable), "GMSPython", "Lib", "site-packages", "certifi", "cacert.pem")
       self.doCloudClient = JobClient(self.doCloudUrl, self.doCloudKey)
     #neos
     else:
       if self.logopt in [1,3,4]:
         sys.stdout.write("Connecting to: %s://%s:%s\n" % (self.serverProtocol,self.serverHost,self.serverPort))
-      elif (self.logopt == 2):
+      if self.logopt in [2,4]:
         # Append the message to the logfile indicated
         try:
           f = open(kestrel.logfilename,'a')
@@ -611,33 +623,41 @@ class KestrelGamsClient:
       gamsFiles[key].close()
 
     # Remove 'kestrel', 'neos' and 'socket_timeout' options from options file; they are not needed
+    email = None
+    xpressemail = None
+    runningtime = None
     self.xml += "<options><![CDATA["
-    try:
+    if self.useOptions:
       with open(self.optfilename) as fp:
         for line in fp.readlines():
           if not re.match(r'kestrel|neos_server|neos_username|neos_user_password|email|xpressemail|runtime|socket_timeout',line):
             self.xml += line
-        self.xml += "]]></options>\n"
-      with open(self.optfilename) as fp:
-        for line in fp.readlines():
-          if re.match(r'email',line):
-            optemail = line.rsplit()
-            self.xml += "<email>"
-            self.xml += optemail[1];
-            self.xml += "</email>\n"
-          if re.match(r'xpressemail',line):
-            optemail = line.rsplit()
-            self.xml += "<xpressemail>"
-            self.xml += optemail[1];
-            self.xml += "</xpressemail>\n"
-          if re.match(r'runtime',line):
-            runningtime = line.rsplit()
-            self.xml += "<priority>"
-            self.xml += runningtime[1];
-            self.xml += "</priority>"
-    except:
-      self.xml += "]]></options>\n"
-	
+          elif re.match(r'email',line):
+            email = line.rsplit()[1]
+          elif re.match(r'xpressemail',line):
+            xpressemail = line.rsplit()[1]
+          elif re.match(r'runtime',line):
+            runningtime = line.rsplit()[1]
+    self.xml += "]]></options>\n"
+
+    if not email:
+      email = self.getDefaultEmail()
+    if not email:
+      self.Error("No email address provided. Either specify it in an option file or set environment variable NEOS_EMAIL (e.g. via gamsconfig.yaml).")
+    self.xml += "<email>"
+    self.xml += email
+    self.xml += "</email>\n"
+
+    if xpressemail:
+      self.xml += "<xpressemail>"
+      self.xml += xpressemail
+      self.xml += "</xpressemail>\n"
+
+    if runningtime:
+      self.xml += "<priority>"
+      self.xml += runningtime
+      self.xml += "</priority>"
+
     self.xml += "</document>"
 
   def submit(self):
@@ -660,7 +680,7 @@ class KestrelGamsClient:
       sys.stdout.write("Check the following URL for progress report :\n")
       #sys.stdout.write("http://www-neos.mcs.anl.gov/cgi-bin/nph-neos-solver.cgi?admin=results&jobnumber=%d&pass=%s\n\n" % (self.jobNumber,self.password))
       sys.stdout.write("%s://%s/neos/cgi-bin/nph-neos-solver.cgi?admin=results&jobnumber=%d&pass=%s\n\n" % (self.serverProtocol,self.serverHost,self.jobNumber,self.password))
-    elif (self.logopt == 2):
+    if self.logopt in [2,4]:
       # Append the error message to the logfile indicated
       try:
         f = open(self.logfilename,'a')
@@ -691,13 +711,13 @@ class KestrelGamsClient:
     except IOError as e:
       self.Fatal("Could not open control file %s" % self.cntrfile)
     lines[12] = "101010 1\n"
-    lines[19] = os.path.join(self.scrdir, "convertd.opt\n")
+    lines[19] = os.path.join(self.scrdir, "convert.opt\n")
     fname = os.path.join(self.scrdir, "gamscntr2.dat")
     f = open(fname, "w")
     f.writelines(["%s" % i  for i in lines])
     f.close()
     
-    fname = os.path.join(self.scrdir, "convertd.opt")
+    fname = os.path.join(self.scrdir, "convert.opt")
     f = open(fname, "w")
     f.write("CplexMPS")
     f.close()
@@ -711,14 +731,14 @@ class KestrelGamsClient:
       except:
           si.dwFlags |= subprocess._subprocess.STARTF_USESHOWWINDOW
           si.wShowWindow = subprocess._subprocess.SW_HIDE
-      cmdLine = "gmsgennx.exe " + os.path.join(self.scrdir, "gamscntr2.dat") + " convertd"
+      cmdLine = "gmsgennx.exe " + os.path.join(self.scrdir, "gamscntr2.dat") + " convert"
       self._p = subprocess.Popen(cmdLine, startupinfo=si, cwd=self.scrdir, creationflags=subprocess.CREATE_NEW_CONSOLE)
 
       exitcode = self._p.wait()
     
     #unix/linux
     else:
-      self._p = subprocess.Popen(["gmsgennx.exe", os.path.join(self.scrdir, "gamscntr2.dat"), "convertd"], cwd=self.scrdir)
+      self._p = subprocess.Popen(["gmsgennx.exe", os.path.join(self.scrdir, "gamscntr2.dat"), "convert"], cwd=self.scrdir)
     
     self.gev = new_gevHandle_tp()
     ret = gevCreate(self.gev, GMS_SSSIZE)
@@ -950,7 +970,7 @@ class KestrelGamsClient:
       if self.logopt in [1,3,4]:
         # Send the output to the screen
         sys.stdout.write(self.getText(node[0]))
-      elif (self.logopt == 2):
+      if self.logopt in [2,4]:
         # Append the error message to the logfile indicated
         try:
           f = open(self.logfilename,'a')
@@ -974,7 +994,7 @@ class KestrelGamsClient:
           if self.logopt in [1,3,4]:
             # Send the output to the screen
             sys.stdout.write(results)
-          elif (self.logopt == 2):
+          if self.logopt in [2,4]:
             # Append the error message to the logfile indicated
             try:
               f = open(self.logfilename,'a')
@@ -1016,6 +1036,14 @@ if __name__=="__main__":
   try:
     kestrel = KestrelGamsClient(sys.argv)
     kestrel.parseControlFile()
+    try:
+      f = open(os.path.join(pathlib.Path(__file__).parent.absolute(),'gamsstmp.txt'),'r')
+      auditLine = f.readline()
+      f.close()
+      kestrel.writeLog('NEOS Kestrel  ' + auditLine)
+    except:
+      pass
+    kestrel.writeLog('\nFor terms of use please inspect https://neos-server.org/neos/termofuse.html\n\n')
     kestrel.writeErrorOutputFiles()
     kestrel.parseOptionsFile()
     kestrel.connectServer()
@@ -1036,8 +1064,7 @@ if __name__=="__main__":
     
       try:
         kestrel.parseOptionsFile()
-        if kestrel.logopt in [1,3,4]:
-          sys.stdout.write("NEOS Solver: %s\n" % kestrel.solverName)
+        kestrel.writeLog("NEOS Solver: %s\n" % kestrel.solverName)
         if (not kestrel.jobNumber) or (not kestrel.password):
           kestrel.checkOptionsFile()
           kestrel.formSubmission()
