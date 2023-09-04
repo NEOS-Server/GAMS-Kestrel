@@ -1,5 +1,5 @@
 @echo off
-set fileDir=%~dp0
+set fileDir=%~5
 set gmsPython=%fileDir%GMSPython\python.exe
 
 if exist "%gmsPython%" (
