@@ -2,7 +2,7 @@
 gmsPython="${5}GMSPython/python"
 if [ -f "${gmsPython}" ]
 then
-    export SSL_CERT_FILE="${5}GMSPython/lib/python3.8/site-packages/certifi/cacert.pem"
+    export SSL_CERT_FILE="${5}GMSPython/lib/python3.12/site-packages/certifi/cacert.pem"
     "$gmsPython" "${5}gmske_ux.out" "$4"
 else
     python3 "${5}gmske_ux.out" "$4"
