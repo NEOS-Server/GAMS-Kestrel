@@ -214,8 +214,8 @@ class KestrelGamsClient:
     #if self.cntver != 41 and self.cntver != 42:
     #  self.Fatal("GAMS 22.x required")
 
-    if self.cntver not in [41, 42, 44, 46, 47, 48, 49, 50, 51, 52]:
-      self.Fatal("GAMS cntr-file version 41, 42, 44, 46, 47, 48, 49, 50, 51, 52 required")
+    if self.cntver not in [41, 42, 44, 46, 47, 48, 49, 50, 51, 52, 53]:
+      self.Fatal("GAMS cntr-file version 41, 42, 44, 46, 47, 48, 49, 50, 51, 52, 53 required")
 
     # extract isAscii, useOptions
     m = re.match(r'(\d+)\s+(\d+)',lines[12])
@@ -273,6 +273,14 @@ class KestrelGamsClient:
     # patch parameter file
     lines[36] = "gmsprmun.scr"
 
+    # downgrade the cntr-file version 53 to 52
+    if self.cntver == 53:
+      lines[0] = "52\n"
+      # remove seventh and eigth license line, license gets replaced anyway
+      del lines[-18]
+      del lines[-18]
+      self.cntver = 52
+
     # downgrade the cntr-file version 52 to 51
     if self.cntver == 52:
       # We do not yet handle models with more than INT_MAX NNZ in Kestrel
@@ -320,7 +328,7 @@ class KestrelGamsClient:
       lines.append("")
 
     # downgrade the cntr-file version 46 to 42
-    # no support for threads, external funclib and scensolver
+    # no support for threads, external funclib and guss
     if self.cntver == 46:
       # 46 -> 42
       lines[0] = "42\n"
@@ -509,6 +517,8 @@ class KestrelGamsClient:
       except IOError as e:
         self.Fatal("Could not append to log file %s" % self.logfilename)
     ssl_context = ssl.create_default_context()
+    if ssl_context.minimum_version < ssl.TLSVersion.TLSv1_2:
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
     if sys.platform == "win32":
       ssl_context.load_verify_locations(certifi.where())
     self.neos = xmlrpc.client.Server("%s://%s:%s" % (self.serverProtocol,self.serverHost,self.serverPort), context=ssl_context)
@@ -539,6 +549,26 @@ class KestrelGamsClient:
     # Get the matrix, dictionary and instruction file
     gamsFiles = {}
     gamsFiles['cntr'] = io.BytesIO(self.cntr.encode())
+
+    # Need to read empinfo.dat or empinfo.scr
+    empInfoFileName = os.path.join(self.scrdir, "empinfo." + self.scrext)
+    if os.access(empInfoFileName,os.R_OK):
+      gamsFiles['empinfo'] = io.BytesIO()
+      f = open(empInfoFileName,"rb")
+      zipper = gzip.GzipFile(mode='wb',fileobj=gamsFiles['empinfo'])
+      zipper.write(f.read())
+      zipper.close()
+      f.close()
+
+    # Need to read scenarios
+    scenDictName = os.path.join(self.scrdir, "scenario_dict." + self.scrext)
+    if os.access(scenDictName,os.R_OK):
+      gamsFiles['scenario'] = io.BytesIO()
+      f = open(scenDictName,"rb")
+      zipper = gzip.GzipFile(mode='wb',fileobj=gamsFiles['scenario'])
+      zipper.write(f.read())
+      zipper.close()
+      f.close()
 
     if os.access(self.matrfilename,os.R_OK):
       gamsFiles['matr'] = io.BytesIO()
@@ -691,6 +721,16 @@ class KestrelGamsClient:
 
   def parseSolution(self,xmlstring):
     doc = xml.dom.minidom.parseString(xmlstring)
+    for tag in ['allsolutions', 'scenrep']:
+        xmltag = tag[:4]
+        node = doc.getElementsByTagName(xmltag)
+        if node and len(node):
+          try:
+            f = open(os.path.join(self.scrdir, f"{tag}.{self.scrext}"), 'wb')
+            f.write(bytes.fromhex(self.getText(node[0])))
+            f.close()
+          except IOError as e:
+            self.Error("Could not write file %s.%s\n" % (tag, self.scrext))
     node = doc.getElementsByTagName('solu')
     if node and len(node):
       try:
