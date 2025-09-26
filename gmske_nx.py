@@ -211,11 +211,8 @@ class KestrelGamsClient:
 
     self.modeltype = int(lines[1].split()[0])
 
-    #if self.cntver != 41 and self.cntver != 42:
-    #  self.Fatal("GAMS 22.x required")
-
-    if self.cntver not in [41, 42, 44, 46, 47, 48, 49, 50, 51, 52, 53]:
-      self.Fatal("GAMS cntr-file version 41, 42, 44, 46, 47, 48, 49, 50, 51, 52, 53 required")
+    if self.cntver not in [42, 44, 46, 47, 48, 49, 50, 51, 52, 53]:
+      self.Fatal("GAMS cntr-file version 42, 44, 46, 47, 48, 49, 50, 51, 52, 53 required")
 
     # extract isAscii, useOptions
     m = re.match(r'(\d+)\s+(\d+)',lines[12])
@@ -359,25 +356,7 @@ class KestrelGamsClient:
       # treat the cntr-file now like a version 42 one
       self.cntver = 42
 
-    # ignore solver section and patch rest based on version number
-    if self.cntver == 41:
-      # remove second part of license
-      lines[-11] = lines[-10] = "\n"
-
-      # make everything in local directory
-      lines[-9] = 'model.scr\n'
-      lines[-4] = 'model.so\n'
-      lines[-3] = 'sbbinfo.scr\n'
-      lines[-2] = 'gamscntr.scr\n'
-      lines[-1] = './\n'
-
-      # set scratch file extension
-      self.scrext = "scr"
-
-      # get the entire control file name
-      self.cntr =  "".join(lines[:37]) + "".join(lines[-11:])
-
-    elif self.cntver == 42:
+    if self.cntver == 42:
       # remove second part of license
       lines[-13] = lines[-12] = "\n"
 
@@ -743,7 +722,7 @@ class KestrelGamsClient:
     node = doc.getElementsByTagName('stat')
     if node and len(node):
       try:
-        f = open(self.statfilename,'w')
+        f = open(self.statfilename,'w',errors='replace')
         f.write(self.getText(node[0]))
         f.close()
       except IOError as e:
@@ -753,11 +732,13 @@ class KestrelGamsClient:
     if node and len(node):
       if self.logopt in [1,3,4]:
         # Send the output to the screen
-        sys.stdout.write(self.getText(node[0]))
+        encoding = sys.stdout.encoding
+        encoded_text = self.getText(node[0]).encode(encoding,errors='replace').decode(encoding)
+        sys.stdout.write(encoded_text)
       if self.logopt in [2,4]:
         # Append the error message to the logfile indicated
         try:
-          f = open(self.logfilename,'a')
+          f = open(self.logfilename,'a',errors='replace')
           f.write(self.getText(node[0]))
           f.close()
         except IOError as e:
